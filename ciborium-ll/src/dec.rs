@@ -102,7 +102,6 @@ impl<R: Read> Decoder<R> {
     }
 
     /// Pulls the next header from the input
-    #[inline]
     pub fn pull(&mut self) -> Result<Header, Error<R::Error>> {
         let offset = self.offset;
         self.pull_title()?
@@ -143,7 +142,6 @@ impl<R: Read> Decoder<R> {
     /// bytes. A large buffer will result in fewer calls to read incoming bytes
     /// at the cost of memory usage. You should consider this trade off when
     /// deciding the size of your buffer.
-    #[inline]
     pub fn bytes(&mut self, len: Option<usize>) -> Segments<R, crate::seg::Bytes> {
         self.push(Header::Bytes(len));
         Segments::new(self, |header| match header {

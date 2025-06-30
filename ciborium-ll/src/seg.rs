@@ -128,7 +128,6 @@ impl<'r, R: Read, P: Parser> Segment<'r, R, P> {
     /// Gets the next parsed chunk within the segment
     ///
     /// Returns `Ok(None)` when all chunks have been read.
-    #[inline]
     pub fn pull<'a>(
         &mut self,
         buffer: &'a mut [u8],
@@ -195,7 +194,6 @@ impl<'r, R: Read, P: Parser> Segments<'r, R, P> {
     /// Gets the next segment in the stream
     ///
     /// Returns `Ok(None)` at the conclusion of the stream.
-    #[inline]
     pub fn pull(&mut self) -> Result<Option<Segment<R, P>>, Error<R::Error>> {
         while self.state != State::Finished {
             let offset = self.reader.offset();

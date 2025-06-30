@@ -56,31 +56,38 @@ pub struct Deserializer<'b, R> {
 
 fn noop(_: u8) {}
 
+macro_rules! recurse {
+    ($self:expr, $body:expr) => {{
+        if $self.recurse == 0 {
+            return Err(Error::RecursionLimitExceeded);
+        }
+
+        $self.recurse -= 1;
+        let result = $body;
+        $self.recurse += 1;
+        result
+    }};
+}
+
 impl<'a, R: Read> Deserializer<'a, R>
 where
     R::Error: core::fmt::Debug,
 {
-    #[inline]
-    fn recurse<V, F: FnOnce(&mut Self) -> Result<V, Error<R::Error>>>(
+    fn integer<A: FnMut(u8)>(
         &mut self,
-        func: F,
-    ) -> Result<V, Error<R::Error>> {
-        if self.recurse == 0 {
-            return Err(Error::RecursionLimitExceeded);
-        }
-
-        self.recurse -= 1;
-        let result = func(self);
-        self.recurse += 1;
-        result
+        header: Option<Header>,
+        should_append: bool,
+        mut append: A,
+    ) -> Result<(bool, u128), Error<R::Error>> {
+        self.integer_impl(header, should_append, &mut append)
     }
 
     #[inline]
-    fn integer<A: FnMut(u8)>(
+    fn integer_impl(
         &mut self,
         mut header: Option<Header>,
         should_append: bool,
-        mut append: A,
+        append: &mut dyn FnMut(u8),
     ) -> Result<(bool, u128), Error<R::Error>> {
         loop {
             let header = match header.take() {
@@ -145,6 +152,96 @@ where
             };
         }
     }
+
+    fn deserialize_identifier_impl(&mut self) -> Result<&str, Error<R::Error>> {
+        loop {
+            let offset = self.decoder.offset();
+
+            return match self.decoder.pull()? {
+                Header::Tag(..) => continue,
+
+                Header::Text(Some(len)) | Header::Bytes(Some(len)) if len <= self.scratch.len() => {
+                    self.decoder.read_exact(&mut self.scratch[..len])?;
+
+                    match core::str::from_utf8(&self.scratch[..len]) {
+                        Ok(s) => Ok(s),
+                        Err(..) => Err(Error::Syntax(offset)),
+                    }
+                }
+
+                header => Err(header.expected("str or bytes")),
+            };
+        }
+    }
+
+    fn deserialize_map_impl(&mut self) -> Result<Access<'_, 'a, R>, Error<R::Error>> {
+        loop {
+            return match self.decoder.pull()? {
+                Header::Tag(..) => continue,
+                Header::Map(len) => Access::new(self, len),
+                header => Err(header.expected("map")),
+            };
+        }
+    }
+    fn deserialize_enum_impl(
+        &mut self,
+        name: &'static str,
+    ) -> Result<EnumVisitAction, Error<R::Error>> {
+        if name == "@@TAG@@" {
+            let tag = match self.decoder.pull()? {
+                Header::Tag(x) => Some(x),
+                header => {
+                    self.decoder.push(header);
+                    None
+                }
+            };
+
+            return Ok(EnumVisitAction::TagAccess(tag));
+        }
+
+        loop {
+            match self.decoder.pull()? {
+                Header::Tag(..) => continue,
+                Header::Map(Some(1)) => (),
+                header @ Header::Text(..) => self.decoder.push(header),
+                header => return Err(header.expected("enum")),
+            }
+
+            return Ok(EnumVisitAction::Access);
+        }
+    }
+
+    fn deserialize_seq_impl(&mut self) -> Result<SeqVisitAction<'_, 'a, R>, Error<R::Error>> {
+        loop {
+            return match self.decoder.pull()? {
+                Header::Tag(..) => continue,
+                Header::Array(len) => Ok(SeqVisitAction::Access(Access::new(self, len)?)),
+                Header::Bytes(len) => {
+                    let mut buffer = Vec::new();
+
+                    let mut segments = self.decoder.bytes(len);
+                    while let Some(mut segment) = segments.pull()? {
+                        while let Some(chunk) = segment.pull(self.scratch)? {
+                            buffer.extend_from_slice(chunk);
+                        }
+                    }
+
+                    Ok(SeqVisitAction::BytesAccess(buffer))
+                }
+                header => Err(header.expected("array")),
+            };
+        }
+    }
+}
+
+enum EnumVisitAction {
+    TagAccess(Option<u64>),
+    Access,
+}
+
+enum SeqVisitAction<'a, 'b, R> {
+    Access(Access<'a, 'b, R>),
+    BytesAccess(Vec<u8>),
 }
 
 impl<'de, 'a, 'b, R: Read> de::Deserializer<'de> for &'a mut Deserializer<'b, R>
@@ -201,8 +298,8 @@ where
                         }
                     }
 
-                    _ => self.recurse(|me| {
-                        let access = TagAccess::new(me, Some(tag));
+                    _ => recurse!(self, {
+                        let access = TagAccess::new(&mut *self, Some(tag));
                         visitor.visit_enum(access)
                     }),
                 }
@@ -397,10 +494,10 @@ where
                     visitor.visit_bytes(&self.scratch[..len])
                 }
 
-                Header::Array(len) => self.recurse(|me| {
-                    let access = Access(me, len);
+                Header::Array(len) => {
+                    let access = Access::new(self, len)?;
                     visitor.visit_seq(access)
-                }),
+                }
 
                 header => Err(header.expected("bytes")),
             };
@@ -428,10 +525,10 @@ where
                     visitor.visit_byte_buf(buffer)
                 }
 
-                Header::Array(len) => self.recurse(|me| {
-                    let access = Access(me, len);
+                Header::Array(len) => {
+                    let access = Access::new(self, len)?;
                     visitor.visit_seq(access)
-                }),
+                }
 
                 header => Err(header.expected("byte buffer")),
             };
@@ -439,45 +536,19 @@ where
     }
 
     fn deserialize_seq<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        loop {
-            return match self.decoder.pull()? {
-                Header::Tag(..) => continue,
-
-                Header::Array(len) => self.recurse(|me| {
-                    let access = Access(me, len);
-                    visitor.visit_seq(access)
-                }),
-
-                Header::Bytes(len) => {
-                    let mut buffer = Vec::new();
-
-                    let mut segments = self.decoder.bytes(len);
-                    while let Some(mut segment) = segments.pull()? {
-                        while let Some(chunk) = segment.pull(self.scratch)? {
-                            buffer.extend_from_slice(chunk);
-                        }
-                    }
-
-                    visitor.visit_seq(BytesAccess::<R>(0, buffer, core::marker::PhantomData))
-                }
-
-                header => Err(header.expected("array")),
-            };
+        match self.deserialize_seq_impl() {
+            Ok(SeqVisitAction::Access(access)) => visitor.visit_seq(access),
+            Ok(SeqVisitAction::BytesAccess(buffer)) => {
+                visitor.visit_seq(BytesAccess::<R>(0, buffer, core::marker::PhantomData))
+            }
+            Err(e) => Err(e),
         }
     }
 
     fn deserialize_map<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        loop {
-            return match self.decoder.pull()? {
-                Header::Tag(..) => continue,
-
-                Header::Map(len) => self.recurse(|me| {
-                    let access = Access(me, len);
-                    visitor.visit_map(access)
-                }),
-
-                header => Err(header.expected("map")),
-            };
+        match self.deserialize_map_impl() {
+            Ok(access) => visitor.visit_map(access),
+            Err(e) => Err(e),
         }
     }
 
@@ -511,27 +582,9 @@ where
         self,
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        loop {
-            let offset = self.decoder.offset();
-
-            return match self.decoder.pull()? {
-                Header::Tag(..) => continue,
-
-                Header::Text(Some(len)) if len <= self.scratch.len() => {
-                    self.decoder.read_exact(&mut self.scratch[..len])?;
-
-                    match core::str::from_utf8(&self.scratch[..len]) {
-                        Ok(s) => visitor.visit_str(s),
-                        Err(..) => Err(Error::Syntax(offset)),
-                    }
-                }
-                Header::Bytes(Some(len)) if len <= self.scratch.len() => {
-                    self.decoder.read_exact(&mut self.scratch[..len])?;
-                    visitor.visit_bytes(&self.scratch[..len])
-                }
-
-                header => Err(header.expected("str or bytes")),
-            };
+        match self.deserialize_identifier_impl() {
+            Ok(s) => visitor.visit_str(s),
+            Err(e) => Err(e),
         }
     }
 
@@ -591,33 +644,16 @@ where
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        if name == "@@TAG@@" {
-            let tag = match self.decoder.pull()? {
-                Header::Tag(x) => Some(x),
-                header => {
-                    self.decoder.push(header);
-                    None
-                }
-            };
-
-            return self.recurse(|me| {
-                let access = TagAccess::new(me, tag);
+        match self.deserialize_enum_impl(name) {
+            Ok(EnumVisitAction::TagAccess(tag)) => recurse!(self, {
+                let access = TagAccess::new(&mut *self, tag);
                 visitor.visit_enum(access)
-            });
-        }
-
-        loop {
-            match self.decoder.pull()? {
-                Header::Tag(..) => continue,
-                Header::Map(Some(1)) => (),
-                header @ Header::Text(..) => self.decoder.push(header),
-                header => return Err(header.expected("enum")),
+            }),
+            Ok(EnumVisitAction::Access) => {
+                let access = Access::new(&mut *self, Some(0))?;
+                visitor.visit_enum(access)
             }
-
-            return self.recurse(|me| {
-                let access = Access(me, Some(0));
-                visitor.visit_enum(access)
-            });
+            Err(e) => Err(e),
         }
     }
 
@@ -629,13 +665,29 @@ where
 
 struct Access<'a, 'b, R>(&'a mut Deserializer<'b, R>, Option<usize>);
 
+impl<'de, 'a, 'b, R: Read> Access<'a, 'b, R> {
+    fn new(de: &'a mut Deserializer<'b, R>, len: Option<usize>) -> Result<Self, Error<R::Error>> {
+        if de.recurse == 0 {
+            return Err(Error::RecursionLimitExceeded);
+        }
+
+        de.recurse -= 1;
+        Ok(Self(de, len))
+    }
+}
+
+impl<'de, 'a, 'b, R> Drop for Access<'a, 'b, R> {
+    fn drop(&mut self) {
+        self.0.recurse += 1;
+    }
+}
+
 impl<'de, 'a, 'b, R: Read> de::SeqAccess<'de> for Access<'a, 'b, R>
 where
     R::Error: core::fmt::Debug,
 {
     type Error = Error<R::Error>;
 
-    #[inline]
     fn next_element_seed<U: de::DeserializeSeed<'de>>(
         &mut self,
         seed: U,
@@ -658,17 +710,11 @@ where
     }
 }
 
-impl<'de, 'a, 'b, R: Read> de::MapAccess<'de> for Access<'a, 'b, R>
+impl<'a, 'b, R: Read> Access<'a, 'b, R>
 where
     R::Error: core::fmt::Debug,
 {
-    type Error = Error<R::Error>;
-
-    #[inline]
-    fn next_key_seed<K: de::DeserializeSeed<'de>>(
-        &mut self,
-        seed: K,
-    ) -> Result<Option<K::Value>, Self::Error> {
+    fn next_key_seed_impl(&mut self) -> Result<Option<()>, Error<R::Error>> {
         match self.1 {
             Some(0) => return Ok(None),
             Some(x) => self.1 = Some(x - 1),
@@ -678,10 +724,27 @@ where
             },
         }
 
-        seed.deserialize(&mut *self.0).map(Some)
+        Ok(Some(()))
+    }
+}
+
+impl<'de, 'a, 'b, R: Read> de::MapAccess<'de> for Access<'a, 'b, R>
+where
+    R::Error: core::fmt::Debug,
+{
+    type Error = Error<R::Error>;
+
+    fn next_key_seed<K: de::DeserializeSeed<'de>>(
+        &mut self,
+        seed: K,
+    ) -> Result<Option<K::Value>, Self::Error> {
+        match self.next_key_seed_impl() {
+            Ok(Some(_)) => seed.deserialize(&mut *self.0).map(Some),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
-    #[inline]
     fn next_value_seed<V: de::DeserializeSeed<'de>>(
         &mut self,
         seed: V,
@@ -702,7 +765,6 @@ where
     type Error = Error<R::Error>;
     type Variant = Self;
 
-    #[inline]
     fn variant_seed<V: de::DeserializeSeed<'de>>(
         self,
         seed: V,
@@ -723,7 +785,6 @@ where
         Ok(())
     }
 
-    #[inline]
     fn newtype_variant_seed<U: de::DeserializeSeed<'de>>(
         self,
         seed: U,
@@ -731,22 +792,20 @@ where
         seed.deserialize(&mut *self.0)
     }
 
-    #[inline]
     fn tuple_variant<V: de::Visitor<'de>>(
         self,
-        _len: usize,
+        len: usize,
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        self.0.deserialize_any(visitor)
+        self.0.deserialize_tuple(len, visitor)
     }
 
-    #[inline]
     fn struct_variant<V: de::Visitor<'de>>(
         self,
         _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        self.0.deserialize_any(visitor)
+        self.0.deserialize_map(visitor)
     }
 }
 
