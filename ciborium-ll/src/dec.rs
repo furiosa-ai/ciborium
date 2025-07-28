@@ -102,6 +102,7 @@ impl<R: Read> Decoder<R> {
     }
 
     /// Pulls the next header from the input
+    #[inline]
     pub fn pull(&mut self) -> Result<Header, Error<R::Error>> {
         let offset = self.offset;
         self.pull_title()?

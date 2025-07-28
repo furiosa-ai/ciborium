@@ -395,6 +395,7 @@ where
         self.deserialize_u64(visitor)
     }
 
+    #[inline]
     fn deserialize_u64<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
         let result = match self.integer(None, false, noop)? {
             (false, raw) => u64::try_from(raw),
@@ -467,7 +468,7 @@ where
                 Header::Tag(..) => continue,
 
                 Header::Text(len) => {
-                    let mut buffer = String::new();
+                    let mut buffer = String::with_capacity(len.unwrap_or_default());
 
                     let mut segments = self.decoder.text(len);
                     while let Some(mut segment) = segments.pull()? {
