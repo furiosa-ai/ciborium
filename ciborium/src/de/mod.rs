@@ -217,7 +217,7 @@ where
                 Header::Tag(..) => continue,
                 Header::Array(len) => Ok(SeqVisitAction::Access(Access::new(self, len)?)),
                 Header::Bytes(len) => {
-                    let mut buffer = Vec::new();
+                    let mut buffer = Vec::with_capacity(safe_size_hint(len));
 
                     let mut segments = self.decoder.bytes(len);
                     while let Some(mut segment) = segments.pull()? {
@@ -468,7 +468,7 @@ where
                 Header::Tag(..) => continue,
 
                 Header::Text(len) => {
-                    let mut buffer = String::with_capacity(len.unwrap_or_default());
+                    let mut buffer = String::with_capacity(safe_size_hint(len));
 
                     let mut segments = self.decoder.text(len);
                     while let Some(mut segment) = segments.pull()? {
@@ -514,7 +514,7 @@ where
                 Header::Tag(..) => continue,
 
                 Header::Bytes(len) => {
-                    let mut buffer = Vec::new();
+                    let mut buffer = Vec::with_capacity(safe_size_hint(len));
 
                     let mut segments = self.decoder.bytes(len);
                     while let Some(mut segment) = segments.pull()? {
@@ -661,6 +661,13 @@ where
     #[inline]
     fn is_human_readable(&self) -> bool {
         false
+    }
+}
+
+fn safe_size_hint(len: Option<usize>) -> usize {
+    match len {
+        Some(x) => x.min(1024),
+        None => 0,
     }
 }
 
