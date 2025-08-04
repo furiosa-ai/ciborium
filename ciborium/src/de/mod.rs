@@ -673,7 +673,7 @@ fn safe_size_hint(len: Option<usize>) -> usize {
 
 struct Access<'a, 'b, R>(&'a mut Deserializer<'b, R>, Option<usize>);
 
-impl<'de, 'a, 'b, R: Read> Access<'a, 'b, R> {
+impl<'a, 'b, R: Read> Access<'a, 'b, R> {
     fn new(de: &'a mut Deserializer<'b, R>, len: Option<usize>) -> Result<Self, Error<R::Error>> {
         if de.recurse == 0 {
             return Err(Error::RecursionLimitExceeded);
@@ -684,7 +684,7 @@ impl<'de, 'a, 'b, R: Read> Access<'a, 'b, R> {
     }
 }
 
-impl<'de, 'a, 'b, R> Drop for Access<'a, 'b, R> {
+impl<'a, 'b, R> Drop for Access<'a, 'b, R> {
     fn drop(&mut self) {
         self.0.recurse += 1;
     }
