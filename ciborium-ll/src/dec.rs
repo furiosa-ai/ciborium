@@ -143,7 +143,7 @@ impl<R: Read> Decoder<R> {
     /// bytes. A large buffer will result in fewer calls to read incoming bytes
     /// at the cost of memory usage. You should consider this trade off when
     /// deciding the size of your buffer.
-    pub fn bytes(&mut self, len: Option<usize>) -> Segments<R, crate::seg::Bytes> {
+    pub fn bytes<'a>(&'a mut self, len: Option<usize>) -> Segments<'a, R, crate::seg::Bytes> {
         self.push(Header::Bytes(len));
         Segments::new(self, |header| match header {
             Header::Bytes(len) => Ok(len),
@@ -163,7 +163,7 @@ impl<R: Read> Decoder<R> {
     /// at the cost of memory usage. You should consider this trade off when
     /// deciding the size of your buffer.
     #[inline]
-    pub fn text(&mut self, len: Option<usize>) -> Segments<R, crate::seg::Text> {
+    pub fn text<'a>(&'a mut self, len: Option<usize>) -> Segments<'a, R, crate::seg::Text> {
         self.push(Header::Text(len));
         Segments::new(self, |header| match header {
             Header::Text(len) => Ok(len),

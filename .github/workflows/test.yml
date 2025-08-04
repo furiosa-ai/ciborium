@@ -14,12 +14,12 @@ jobs:
       fail-fast: false
       matrix:
         toolchain:
-          - 1.70.0
+          - 1.81.0
           - stable
           - beta
           - nightly
         crates:
-          - {name: ciborium-ll}
+          - {name: ciborium-ll, feat: half}
           - {name: ciborium}
           - {name: ciborium, feat: std}
           - {name: ciborium-io}

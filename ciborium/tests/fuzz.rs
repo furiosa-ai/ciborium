@@ -36,16 +36,18 @@ fn fuzz() {
             let mut child = unsafe { File::from_raw_fd(fds[1]) };
             unsafe { close(fds[0]) };
 
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let mut buffer = [0u8; 32];
 
             for _ in 0..ITERATIONS {
-                let len = rng.gen_range(0..buffer.len());
+                let len = rng.random_range(0..buffer.len());
                 rng.fill(&mut buffer[..len]);
 
                 writeln!(child, "{}", hex::encode(&buffer[..len])).unwrap();
                 writeln!(child, "{:?}", from_reader::<Value, _>(&buffer[..len])).unwrap();
             }
+
+            std::process::exit(0);
         }
 
         pid => {
@@ -54,12 +56,12 @@ fn fuzz() {
 
             let mut string = String::new();
             parent.read_to_string(&mut string).unwrap();
-            eprint!("{}", string);
+            eprint!("{string}");
 
             let mut status = 0;
             assert_eq!(pid, unsafe { waitpid(pid, &mut status, 0) });
 
-            eprintln!("exit status: {:?}", status);
+            eprintln!("exit status: {status:?}");
             assert_eq!(0, status);
         }
     }

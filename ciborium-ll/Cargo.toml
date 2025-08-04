@@ -4,13 +4,13 @@ version = "0.2.2"
 authors = ["Nathaniel McCallum <npmccallum@profian.com>"]
 license = "Apache-2.0"
 edition = "2021"
-rust-version = "1.70"
 homepage = "https://github.com/enarx/ciborium"
 repository = "https://github.com/enarx/ciborium"
 description = "Low-level CBOR codec primitives"
 readme = "README.md"
 keywords = ["cbor"]
 categories = ["data-structures", "embedded", "encoding", "no-std", "parsing"]
+rust-version = "1.81"
 
 [badges]
 # See https://doc.rust-lang.org/cargo/reference/manifest.html#the-badges-section
@@ -22,12 +22,13 @@ is-it-maintained-open-issues = { repository = "enarx/ciborium" }
 
 [dependencies]
 ciborium-io = { path = "../ciborium-io", version = "0.2.2" }
-half = { version = "=2.4.1", default-features = false}
+half = { version = "2.6", default-features = false, optional = true }
 
 [dev-dependencies]
 hex = "0.4"
 
 [features]
+default = ["half"]
 alloc = []
 std = ["alloc", "half/std"]
 

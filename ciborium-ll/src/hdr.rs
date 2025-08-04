@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(feature = "half")]
 use half::f16;
 
 /// A semantic representation of a CBOR item header
@@ -121,9 +122,9 @@ impl From<Header> for Title {
     fn from(header: Header) -> Self {
         let int = |i: u64| match i {
             x if x <= 23 => Minor::This(i as u8),
-            x if x <= core::u8::MAX as u64 => Minor::Next1([i as u8]),
-            x if x <= core::u16::MAX as u64 => Minor::Next2((i as u16).to_be_bytes()),
-            x if x <= core::u32::MAX as u64 => Minor::Next4((i as u32).to_be_bytes()),
+            x if x <= u8::MAX as u64 => Minor::Next1([i as u8]),
+            x if x <= u16::MAX as u64 => Minor::Next2((i as u16).to_be_bytes()),
+            x if x <= u32::MAX as u64 => Minor::Next4((i as u32).to_be_bytes()),
             x => Minor::Next8(x.to_be_bytes()),
         };
 
@@ -146,7 +147,12 @@ impl From<Header> for Title {
             },
 
             Header::Float(n64) => {
+                #[cfg(feature = "half")]
                 let n16 = f16::from_f64(n64);
+
+                #[cfg(not(feature = "half"))]
+                let n16 = n64 as f16;
+
                 let n32 = n64 as f32;
 
                 Title(

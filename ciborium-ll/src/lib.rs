@@ -123,6 +123,7 @@
 //! assert_eq!(b"\xa1\x07\x7f\x67Hello, \x66World!\xff", &buffer[..]);
 //! ```
 
+#![cfg_attr(not(feature = "half"), feature(f16))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
 #![deny(clippy::all)]
@@ -228,8 +229,6 @@ mod tests {
     #[allow(clippy::excessive_precision)]
     #[test]
     fn leaf() {
-        use core::f64::{INFINITY, NAN};
-
         let data = &[
             (Header::Positive(0), "00", true),
             (Header::Positive(1), "01", true),
@@ -264,15 +263,15 @@ mod tests {
             (Header::Float(0.00006103515625), "f90400", true),
             (Header::Float(-4.0), "f9c400", true),
             (Header::Float(-4.1), "fbc010666666666666", true),
-            (Header::Float(INFINITY), "f97c00", true),
-            (Header::Float(NAN), "f97e00", true),
-            (Header::Float(-INFINITY), "f9fc00", true),
-            (Header::Float(INFINITY), "fa7f800000", false),
-            (Header::Float(NAN), "fa7fc00000", false),
-            (Header::Float(-INFINITY), "faff800000", false),
-            (Header::Float(INFINITY), "fb7ff0000000000000", false),
-            (Header::Float(NAN), "fb7ff8000000000000", false),
-            (Header::Float(-INFINITY), "fbfff0000000000000", false),
+            (Header::Float(f64::INFINITY), "f97c00", true),
+            (Header::Float(f64::NAN), "f97e00", true),
+            (Header::Float(-f64::INFINITY), "f9fc00", true),
+            (Header::Float(f64::INFINITY), "fa7f800000", false),
+            (Header::Float(f64::NAN), "fa7fc00000", false),
+            (Header::Float(-f64::INFINITY), "faff800000", false),
+            (Header::Float(f64::INFINITY), "fb7ff0000000000000", false),
+            (Header::Float(f64::NAN), "fb7ff8000000000000", false),
+            (Header::Float(-f64::INFINITY), "fbfff0000000000000", false),
             (Header::Simple(simple::FALSE), "f4", true),
             (Header::Simple(simple::TRUE), "f5", true),
             (Header::Simple(simple::NULL), "f6", true),
